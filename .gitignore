@@ -1,0 +1,12 @@
+# Ignorar binarios y ejecutables de C
+*.exe
+*.o
+*.obj
+build/
+bin/
+# Ignorar temporales y entornos virtuales de Python
+__pycache__/
+*.py[cod]
+.venv/
+env/
+*.log
