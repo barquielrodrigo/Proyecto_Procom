@@ -62,7 +62,7 @@ def graficar_diagrama_ojo(senial, sps, titulo, n_simbolos_pantalla=3, n_trazas=4
     for i in range(n_trazas):
         idx_inicio = i * muestras_por_traza
         segmento = senial_estable[idx_inicio : idx_inicio + muestras_por_traza]
-        plt.plot(t_eje, segmento, color='blue', alpha=0.04)
+        plt.plot(t_eje, segmento, color='blue', alpha=0.04, linewidth=2.5)
         
     plt.title(f"Diagrama de Ojo - {titulo}")
     plt.xlabel("Tiempo [Símbolos $T$]")

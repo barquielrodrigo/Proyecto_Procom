@@ -12,7 +12,7 @@ from scipy.stats import gaussian_kde
 def aplicar_lpf_butterworth(senial, fs, fc, orden, causal=True):
     """
     Aplica filtro pasa-bajos Butterworth.
-    Si causal=False, aplica filtrado de fase cero (sosfiltfilt) util para la referencia ideal.
+    Si causal=False, aplica filtrado de fase cero (sosfiltfilt) útil para la referencia ideal.
     """
     sos = signal.butter(N=orden, Wn=fc, btype='lowpass', analog=False, fs=fs, output='sos')
     if causal:
@@ -32,15 +32,24 @@ def aplicar_skew_temporal(senial, fs, tau):
     desfase = np.exp(-1j * 2 * np.pi * f * tau)
     return np.fft.irfft(S_f * desfase, n=N)
 
-def obtener_muestras_simbolo(senial, sps, ref_ideal):
+def obtener_instante_optimo(senial, ref_ideal):
     """
-    Encuentra el retardo de grupo entero introducido por los filtros causales
-    correlacionando cada rama con su respectiva referencia ideal (I_ideal o Q_ideal)
-    y diezma la señal a 1 muestra por símbolo (1 SPS).
+    Calcula el retardo de grupo entero (en muestras) introducido por los filtros analógicos
+    mediante correlación cruzada con la referencia ideal.
     """
     corr = np.correlate(senial, ref_ideal, mode='full')
-    lag = np.argmax(np.abs(corr)) - (len(ref_ideal) - 1)
-    lag = max(0, lag)
+    lag = int(np.argmax(np.abs(corr)) - (len(ref_ideal) - 1))
+    return max(0, lag)
+
+def obtener_muestras_simbolo(senial, sps, ref_ideal, lag_fijo=None):
+    """
+    Muestrea la señal aplicando un reloj ideal periódico (período exacto T = sps muestras)
+    sincronizado con el instante de punto máximo del símbolo.
+    """
+    if lag_fijo is None:
+        lag = obtener_instante_optimo(senial, ref_ideal)
+    else:
+        lag = lag_fijo
     
     muestras = senial[lag::sps]
     margen = 15
@@ -48,12 +57,22 @@ def obtener_muestras_simbolo(senial, sps, ref_ideal):
         muestras = muestras[margen:-margen]
     return muestras
 
-def graficar_diagrama_ojo(senial, sps, titulo, n_simbolos_pantalla=3, n_trazas=400):
+def graficar_diagrama_ojo(senial, sps, titulo, ref_ideal=None, lag_fijo=None, n_simbolos_pantalla=3, n_trazas=400):
     """
-    Grafica el diagrama de ojo en una figura propia.
+    Grafica el diagrama de ojo sincronizando el reloj de trazado con el punto
+    máximo del símbolo para centrar la apertura.
     """
+    if lag_fijo is not None:
+        lag = lag_fijo
+    elif ref_ideal is not None:
+        lag = obtener_instante_optimo(senial, ref_ideal)
+    else:
+        lag = 0
+
     muestras_por_traza = sps * n_simbolos_pantalla
-    senial_estable = senial[10*sps:]
+    inicio_estable = 15 * sps + lag
+    senial_estable = senial[inicio_estable:]
+    
     n_trazas_posibles = len(senial_estable) // muestras_por_traza
     n_trazas = min(n_trazas, n_trazas_posibles)
     
@@ -65,23 +84,27 @@ def graficar_diagrama_ojo(senial, sps, titulo, n_simbolos_pantalla=3, n_trazas=4
         segmento = senial_estable[idx_inicio : idx_inicio + muestras_por_traza]
         plt.plot(t_eje, segmento, color='blue', alpha=0.04)
         
+    for k in range(n_simbolos_pantalla):
+        plt.axvline(k, color='red', linestyle='--', alpha=0.35, linewidth=0.9, label='Instante Clock Ideal' if k == 0 else "")
+        
     plt.title(f"Diagrama de Ojo - {titulo}")
     plt.xlabel("Tiempo [Símbolos $T$]")
     plt.ylabel("Amplitud")
     plt.grid(True)
+    plt.legend(loc='upper right')
 
-def graficar_constelacion(senial_I, sps, ref_I, titulo, senial_Q=None, ref_Q=None, cmap='jet'):
+def graficar_constelacion(senial_I, sps, ref_I, titulo, senial_Q=None, ref_Q=None, lag_fijo=None, cmap='jet'):
     """
-    Grafica la constelación de los símbolos recibidos coloreados por densidad de puntos (Heatmap).
+    Grafica la constelación de los símbolos recibidos coloreados por densidad de puntos (Heatmap con Gaussian KDE).
     """
-    muestras_I = obtener_muestras_simbolo(senial_I, sps, ref_I)
+    muestras_I = obtener_muestras_simbolo(senial_I, sps, ref_I, lag_fijo=lag_fijo)
     
     plt.figure(figsize=(6.5, 6))
     
     if senial_Q is not None:
         if ref_Q is None:
             ref_Q = ref_I
-        muestras_Q = obtener_muestras_simbolo(senial_Q, sps, ref_Q)
+        muestras_Q = obtener_muestras_simbolo(senial_Q, sps, ref_Q, lag_fijo=lag_fijo)
         n_min = min(len(muestras_I), len(muestras_Q))
         muestras_I, muestras_Q = muestras_I[:n_min], muestras_Q[:n_min]
         
@@ -103,6 +126,7 @@ def graficar_constelacion(senial_I, sps, ref_I, titulo, senial_Q=None, ref_Q=Non
         
     else:
         # Caso 1D (PAM-4): Agregamos jitter aleatorio en Y para formar nubes 2D de densidad
+        np.random.seed(42)
         y_jitter = np.random.normal(0, 0.08, size=len(muestras_I))
         
         xy = np.vstack([muestras_I, y_jitter])
@@ -204,10 +228,8 @@ IF_I, _ = aplicar_lpf_butterworth(post_mix_I, fs, 100e9, 1)
 post_mix_Q = (RF + LO_Port * LO_Q) * LO_Q + RF_IF * RF + LO_Port * LO_Q
 IF_Q, _ = aplicar_lpf_butterworth(post_mix_Q, fs, 100e9, 1)
 
-# Banda base no requiere el mixer. En esta simulación se aplica FI en dos bandas (0-48 y 48-96)
-
 # --- BLOQUE 3: TRACK & HOLD CON BANDWIDTH MISMATCH d_I(t), d_Q(t) ---
-delta_Bd_pct = 0.15                # Mismatch del +15% en rama Q (no es 10%?)
+delta_Bd_pct = 0.15                # Mismatch del +15% en rama Q
 BW_th_I = B_d                      # 48.0 GHz
 BW_th_Q = B_d * (1 + delta_Bd_pct) # 55.2 GHz
 
@@ -217,12 +239,9 @@ Q_solo_bw_nom, _ = aplicar_lpf_butterworth(Q_mixer_ideal, fs, BW_th_I, 4)
 Q_solo_bw_mis, _ = aplicar_lpf_butterworth(Q_mixer_ideal, fs, BW_th_Q, 4)
 
 # B) Efecto Acumulado en la cadena (TIA + Mixer + T&H con BW Mismatch)
-#Banda alta
 out_I_th, _ = aplicar_lpf_butterworth(IF_I, fs, BW_th_I, 4)
 out_Q_th_nom, _ = aplicar_lpf_butterworth(IF_Q, fs, BW_th_I, 4)
 out_Q_th, _ = aplicar_lpf_butterworth(IF_Q, fs, BW_th_Q, 4)
-#Banda base
-out_bb, _ = aplicar_lpf_butterworth(senial_tia, fs, BW_th_I, 4)
 
 # --- BLOQUE 4: TIME SKEW INTRABANDA (tau_IB) ---
 tau_IB = 1.2e-12         # 1.2 ps de skew entre ramas I y Q
@@ -239,184 +258,25 @@ out_Q_total = aplicar_skew_temporal(out_Q_th, fs, tau_Q)
 
 
 # =============================================================================
-# SECUENCIA DE GRÁFICOS EN EL ORDEN DEL DIAGRAMA DE BLOQUES
+# RECONSTRUCCIÓN DE SEÑAL (SR) CON RELOJ IDEAL SINCRONIZADO AL MÁXIMO
 # =============================================================================
 
+# 1) Reconstrucción Ideal (Fase cero: instante óptimo lag = 0)
+reconst_ideal = 2 * (I_subbanda_ideal * np.cos(2 * np.pi * f_lo * t) + 
+                     Q_subbanda_ideal * np.sin(2 * np.pi * f_lo * t))
 
-
-# -----------------------------------------------------------------------------
-# PASO 0: SEÑAL TRANSMITIDA IDEAL (CONFORMACIÓN COSENO REALZADO)
-# -----------------------------------------------------------------------------
-# rc.plot(time_domain=True, freq_domain=True)
-
-# plt.figure(figsize=(10, 4))
-# plt.plot(senial_alineada[:200], color='b', alpha=0.6, label='Señal PAM-4 conformada')
-# plt.stem(simb_upsampled[:200], linefmt='r-', markerfmt='ro', basefmt='k-', label='Símbolos ideales')
-# plt.xlabel('Muestras')
-# plt.ylabel('Amplitud')
-# plt.title('Paso 0: Señal PAM-4 Transmitida Ideal (Banda Base Completa)')
-# plt.grid(True)
-# plt.legend()
-# plt.show()
-
-# graficar_diagrama_ojo(senial_alineada, sps, "Paso 0: Señal Ideal Transmitida")
-# graficar_constelacion(senial_alineada, sps, senial_alineada, "Paso 0: Señal PAM-4 Ideal")
-# plt.show()
-
-
-# # -----------------------------------------------------------------------------
-# # PASO 1: BLOQUE TIA - b(t) (Aún en Banda Base Completa antes del Mixer)
-# # -----------------------------------------------------------------------------
-# plt.figure(figsize=(10, 4))
-# plt.plot(senial_alineada[:200], '--', label="Señal PAM-4 Ideal (Sin distorsión)", alpha=0.7)
-# plt.plot(senial_tia[:200], label="Salida del TIA (LPF 3º Orden, 100 GHz)", linewidth=2)
-# plt.xlabel('Muestras')
-# plt.ylabel('Amplitud')
-# plt.title('Paso 1: Efecto del TIA comparado contra la Señal PAM-4 Ideal')
-# plt.grid(True)
-# plt.legend()
-# plt.show()
-
-# graficar_diagrama_ojo(senial_tia, sps, "Paso 1: Salida del TIA")
-# graficar_constelacion(senial_tia, sps, senial_alineada, "Paso 1: Salida del TIA")
-# plt.show()
-
-
-# # -----------------------------------------------------------------------------
-# # PASO 2: BLOQUE MEZCLADOR EN CUADRATURA (Comparado contra I y Q Ideales)
-# # -----------------------------------------------------------------------------
-# plt.figure(figsize=(10, 5))
-# plt.subplot(2, 1, 1)
-# plt.plot(I_mixer_ideal[:200], '--', label="Rama I Ideal (Mixer sin distorsión)", alpha=0.7)
-# plt.plot(IF_I[:200], label="Salida Mixer Real (Rama I con errores y fugas)", linewidth=1.8)
-# plt.title('Paso 2: Efecto del Mezclador en Cuadratura comparado con Ramas I y Q Ideales')
-# plt.ylabel('Amplitud (I)')
-# plt.grid(True)
-# plt.legend()
-
-# plt.subplot(2, 1, 2)
-# plt.plot(Q_mixer_ideal[:200], '--', label="Rama Q Ideal (Mixer sin distorsión)", alpha=0.7)
-# plt.plot(IF_Q[:200], label="Salida Mixer Real (Rama Q con errores y fugas)", linewidth=1.8, color='orange')
-# plt.xlabel('Muestras')
-# plt.ylabel('Amplitud (Q)')
-# plt.grid(True)
-# plt.legend()
-# plt.tight_layout()
-# plt.show()
-
-# # -----------------------------------------------------------------------------
-# # PASO 3: BLOQUE TRACK & HOLD CON BANDWIDTH MISMATCH - d_I(t), d_Q(t)
-# # -----------------------------------------------------------------------------
-# # 3.A) Efecto Individual del Bandwidth Mismatch (Comparado contra Sub-bandas I/Q Ideales)
-# plt.figure(figsize=(10, 5))
-# plt.subplot(2, 1, 1)
-# plt.plot(I_subbanda_ideal[:200], '--', label="Sub-banda I Ideal (Fase cero, 48 GHz)", alpha=0.7)
-# plt.plot(I_solo_bw[:200], label=f"Rama I T&H Causal (BW nominal = {BW_th_I/1e9:.1f} GHz)", linewidth=1.8)
-# plt.title(f'Paso 3.A: Efecto Individual del T&H y Bandwidth Mismatch ($\\Delta B_d = {delta_Bd_pct*100:+.0f}\\%$)')
-# plt.ylabel('Amplitud (I)')
-# plt.grid(True)
-# plt.legend()
-
-# plt.subplot(2, 1, 2)
-# plt.plot(Q_subbanda_ideal[:200], ':', label="Sub-banda Q Ideal (Sin distorsión, 48 GHz)", alpha=0.7)
-# plt.plot(Q_solo_bw_nom[:200], '--', label=f"Rama Q T&H sin mismatch ({BW_th_I/1e9:.1f} GHz)", alpha=0.8)
-# plt.plot(Q_solo_bw_mis[:200], label=f"Rama Q T&H con mismatch ({BW_th_Q/1e9:.1f} GHz)", linewidth=1.8, color='orange')
-# plt.xlabel('Muestras')
-# plt.ylabel('Amplitud (Q)')
-# plt.grid(True)
-# plt.legend()
-# plt.tight_layout()
-# plt.show()
-
-# # 3.B) Efecto Acumulado hasta el T&H (Comparado contra Sub-bandas I/Q Ideales)
-# plt.figure(figsize=(10, 5))
-# plt.subplot(2, 1, 1)
-# plt.plot(I_subbanda_ideal[:200], '--', label="Sub-banda I Ideal (Sin distorsiones)", alpha=0.7)
-# plt.plot(out_I_th[:200], label=f"Salida T&H Acumulada I (BW={BW_th_I/1e9:.1f} GHz)", linewidth=2)
-# plt.title('Paso 3.B: Efecto Acumulado hasta T&H (TIA + Mixer + BW Mismatch) vs Sub-bandas Ideales')
-# plt.ylabel('Amplitud (I)')
-# plt.grid(True)
-# plt.legend()
-
-# plt.subplot(2, 1, 2)
-# plt.plot(Q_subbanda_ideal[:200], ':', label="Sub-banda Q Ideal (Sin distorsiones)", alpha=0.7)
-# plt.plot(out_Q_th_nom[:200], '--', label=f"Salida T&H Acumulada Q sin mismatch ({BW_th_I/1e9:.1f} GHz)", alpha=0.8)
-# plt.plot(out_Q_th[:200], label=f"Salida T&H Acumulada Q con mismatch ({BW_th_Q/1e9:.1f} GHz)", linewidth=2, color='orange')
-# plt.xlabel('Muestras')
-# plt.ylabel('Amplitud (Q)')
-# plt.grid(True)
-# plt.legend()
-# plt.tight_layout()
-# plt.show()
-
-# graficar_diagrama_ojo(out_Q_th, sps, "Paso 3.B: Salida T&H Acumulada con BW Mismatch (Rama Q)")
-# graficar_constelacion(out_I_th, sps, I_subbanda_ideal, "Paso 3.B: Acumulada tras T&H con BW Mismatch (Plano I vs Q)", senial_Q=out_Q_th, ref_Q=Q_subbanda_ideal)
-# plt.show()
-
-
-# # -----------------------------------------------------------------------------
-# # PASO 4: BLOQUE TIME SKEW INTRABANDA (tau_IB) Y CADENA COMPLETA FINAL
-# # -----------------------------------------------------------------------------
-# # 4.A) Efecto Individual del Skew Intrabanda (Comparado contra Sub-bandas I/Q Ideales)
-# plt.figure(figsize=(10, 5))
-# plt.subplot(2, 1, 1)
-# plt.plot(I_subbanda_ideal[:150], '--', label="Sub-banda I Ideal (Sin skew)", alpha=0.7)
-# plt.plot(I_solo_skew[:150], label=f"Sub-banda I con skew ({tau_I*1e12:.2f} ps)", linewidth=1.8)
-# plt.title(f'Paso 4.A: Efecto Individual del Skew Intrabanda ($\\tau_{{IB}} = {tau_IB*1e12:.2f}$ ps) sobre Sub-bandas Ideales')
-# plt.ylabel('Amplitud (I)')
-# plt.grid(True)
-# plt.legend()
-
-# plt.subplot(2, 1, 2)
-# plt.plot(Q_subbanda_ideal[:150], '--', label="Sub-banda Q Ideal (Sin skew)", alpha=0.7)
-# plt.plot(Q_solo_skew[:150], label=f"Sub-banda Q con skew (+{tau_Q*1e12:.2f} ps)", linewidth=1.8, color='orange')
-# plt.xlabel('Muestras')
-# plt.ylabel('Amplitud (Q)')
-# plt.grid(True)
-# plt.legend()
-# plt.tight_layout()
-# plt.show()
-
-# graficar_diagrama_ojo(I_solo_skew, sps, "Paso 4.A: Efecto Individual Skew Intrabanda (Rama I)")
-# graficar_constelacion(I_solo_skew, sps, I_subbanda_ideal, "Paso 4.A: Solo Skew Intrabanda (Plano I vs Q)", senial_Q=Q_solo_skew, ref_Q=Q_subbanda_ideal)
-# plt.show()
-
-# # 4.B) Cadena Completa Final: Ramas I y Q con TODOS los efectos vs Ramas I y Q Ideales
-# plt.figure(figsize=(10, 5))
-# plt.subplot(2, 1, 1)
-# plt.plot(I_subbanda_ideal[:200], '--', label="Sub-banda I Ideal (Sin distorsiones del ADC)", alpha=0.7)
-# plt.plot(out_I_total[:200], label="Señal Final a Ecualizar (Rama I - Todos los efectos)", linewidth=2)
-# plt.title('Paso 4.B: Comparación Final — Sub-bandas I y Q Ideales vs Señales con Todas las Distorsiones')
-# plt.ylabel('Amplitud (I)')
-# plt.grid(True)
-# plt.legend()
-
-# plt.subplot(2, 1, 2)
-# plt.plot(Q_subbanda_ideal[:200], '--', label="Sub-banda Q Ideal (Sin distorsiones del ADC)", alpha=0.7)
-# plt.plot(out_Q_total[:200], label="Señal Final a Ecualizar (Rama Q - Todos los efectos)", linewidth=2, color='orange')
-# plt.xlabel('Muestras')
-# plt.ylabel('Amplitud (Q)')
-# plt.grid(True)
-# plt.legend()
-# plt.tight_layout()
-# plt.show()
-
-# # Ojo y Constelación Final - Rama I
-# graficar_diagrama_ojo(out_I_total, sps, "Paso 4.B: Señal Final a Ecualizar con TODOS los efectos (Rama I)")
-# graficar_constelacion(out_I_total, sps, I_subbanda_ideal, "Paso 4.B: Señal Final solo Rama I vs Ideal")
-
-# # Ojo y Constelación Final - Rama Q y Conjunta I/Q
-# graficar_diagrama_ojo(out_Q_total, sps, "Paso 4.B: Señal Final a Ecualizar con TODOS los efectos (Rama Q)")
-# graficar_constelacion(out_I_total, sps, I_subbanda_ideal, "Paso 4.B: Cadena Completa con TODOS los efectos (Plano I vs Q)", senial_Q=out_Q_total, ref_Q=Q_subbanda_ideal)
-# plt.show()
-
-# Constelaciones
-# Post TIA (mas cercano al ideal)
-reconst = 2 * (I_subbanda_ideal * np.cos(2 * np.pi * f_lo * t) + Q_subbanda_ideal * np.sin(2 * np.pi * f_lo * t))
-graficar_constelacion(np.real(reconst), sps, senial_alineada, "Reconstruccion ideal")
+graficar_diagrama_ojo(np.real(reconst_ideal), sps, "Reconstrucción Ideal", lag_fijo=0)
 plt.show()
-# Final de la cadena (mas deformada)
-reconst = 2 * (out_I_total * np.cos(2 * np.pi * f_lo * t) + out_Q_total * np.sin(2 * np.pi * f_lo * t))
-graficar_constelacion(np.real(reconst), sps, senial_alineada, "Reconstruccion final")
-plt.show()
+graficar_constelacion(np.real(reconst_ideal), sps, senial_alineada, "Reconstrucción Ideal", lag_fijo=0)
 
+# 2) Sincronización del Reloj Ideal para la cadena causal (TIA + Mixer + T&H)
+lag_reloj_ideal = obtener_instante_optimo(I_solo_bw, I_subbanda_ideal)
+t_sinc = t - (lag_reloj_ideal / fs)
+
+# Reconstrucción final con distorsiones acumuladas bajo reloj ideal
+reconst_final = 2 * (out_I_total * np.cos(2 * np.pi * f_lo * t_sinc) + 
+                     out_Q_total * np.sin(2 * np.pi * f_lo * t_sinc))
+
+graficar_diagrama_ojo(np.real(reconst_final), sps, "Reconstrucción Final (Clock Ideal)", lag_fijo=lag_reloj_ideal)
+plt.show()
+graficar_constelacion(np.real(reconst_final), sps, senial_alineada, "Reconstrucción Final (Clock Ideal)", lag_fijo=lag_reloj_ideal)
