@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import random
 import sys
 from scipy import signal
+from scipy.stats import gaussian_kde
 
 # =============================================================================
 # FUNCIONES DE PROCESAMIENTO Y GRAFICACIÓN
@@ -69,14 +70,14 @@ def graficar_diagrama_ojo(senial, sps, titulo, n_simbolos_pantalla=3, n_trazas=4
     plt.ylabel("Amplitud")
     plt.grid(True)
 
-def graficar_constelacion(senial_I, sps, ref_I, titulo, senial_Q=None, ref_Q=None):
+def graficar_constelacion(senial_I, sps, ref_I, titulo, senial_Q=None, ref_Q=None, cmap='jet'):
     """
-    Grafica en una figura aparte la constelación de los símbolos recibidos,
-    sincronizando cada rama contra su respectiva señal ideal (ref_I y ref_Q).
+    Grafica la constelación de los símbolos recibidos coloreados por densidad de puntos (Heatmap).
     """
     muestras_I = obtener_muestras_simbolo(senial_I, sps, ref_I)
     
-    plt.figure(figsize=(6, 6))
+    plt.figure(figsize=(6.5, 6))
+    
     if senial_Q is not None:
         if ref_Q is None:
             ref_Q = ref_I
@@ -84,31 +85,49 @@ def graficar_constelacion(senial_I, sps, ref_I, titulo, senial_Q=None, ref_Q=Non
         n_min = min(len(muestras_I), len(muestras_Q))
         muestras_I, muestras_Q = muestras_I[:n_min], muestras_Q[:n_min]
         
-        # Muestras ideales de referencia para superponer en el gráfico 2D
-        id_I = ref_I[::sps][15:-15]
-        id_Q = ref_Q[::sps][15:-15]
-        n_id = min(len(id_I), len(id_Q))
+        # 1. Cálculo de Densidad 2D con Gaussian KDE
+        xy = np.vstack([muestras_I, muestras_Q])
+        z = gaussian_kde(xy)(xy)
         
-        plt.scatter(muestras_I, muestras_Q, color='crimson', alpha=0.35, s=18, edgecolors='none', label='Símbolos distorsionados')
-        plt.scatter(id_I[:n_id], id_Q[:n_id], color='black', marker='x', s=50, alpha=0.7, label='Sub-bandas I/Q Ideales')
-        plt.xlabel("En Fase (Rama I)")
-        plt.ylabel("En Cuadratura (Rama Q)")
+        # 2. Ordenar puntos para que los más densos (rojos) se dibujen al frente
+        idx = z.argsort()
+        x, y, z = muestras_I[idx], muestras_Q[idx], z[idx]
+        
+        # 3. Scatter plot coloreado por densidad
+        sc = plt.scatter(x, y, c=z, cmap=cmap, s=8, edgecolors='none')
+        cbar = plt.colorbar(sc)
+        cbar.set_label('Densidad de símbolos')
+        
+        plt.xlabel("In phase")
+        plt.ylabel("Quadrature")
+        
     else:
-        y_zeros = np.zeros_like(muestras_I)
-        plt.scatter(muestras_I, y_zeros, color='darkorange', alpha=0.35, s=25, edgecolors='none', label='Muestras recibidas')
+        # Caso 1D (PAM-4): Agregamos jitter aleatorio en Y para formar nubes 2D de densidad
+        y_jitter = np.random.normal(0, 0.08, size=len(muestras_I))
+        
+        xy = np.vstack([muestras_I, y_jitter])
+        z = gaussian_kde(xy)(xy)
+        
+        idx = z.argsort()
+        x, y, z = muestras_I[idx], y_jitter[idx], z[idx]
+        
+        sc = plt.scatter(x, y, c=z, cmap=cmap, s=12, edgecolors='none')
+        cbar = plt.colorbar(sc)
+        cbar.set_label('Densidad de símbolos')
+        
         for nivel in [-3, -1, 1, 3]:
             plt.axvline(nivel, color='black', linestyle='--', alpha=0.5)
-        plt.scatter([-3, -1, 1, 3], [0, 0, 0, 0], color='black', marker='x', s=80, label='Niveles PAM-4 ideales')
-        plt.xlabel("Amplitud (Niveles PAM-4)")
-        plt.ylabel("Cuadratura")
+            
+        plt.xlabel("In phase")
+        plt.ylabel("Quadrature")
         plt.ylim(-1, 1)
 
     plt.title(f"Constelación Recibida - {titulo}")
     plt.axhline(0, color='gray', linewidth=0.5)
     plt.axvline(0, color='gray', linewidth=0.5)
     plt.grid(True, linestyle=':', alpha=0.7)
-    plt.legend(loc='upper right')
     plt.tight_layout()
+    plt.show()
 
 
 # =============================================================================
@@ -223,11 +242,7 @@ out_Q_total = aplicar_skew_temporal(out_Q_th, fs, tau_Q)
 # SECUENCIA DE GRÁFICOS EN EL ORDEN DEL DIAGRAMA DE BLOQUES
 # =============================================================================
 
-# plt.figure(figsize=(8,6))
-# plt.plot(t,reconst_ideal,label='Reconstruccion')
-# plt.plot(t,senial_alineada,label='Ideal')
-# plt.legend()
-# plt.show()
+
 
 # -----------------------------------------------------------------------------
 # PASO 0: SEÑAL TRANSMITIDA IDEAL (CONFORMACIÓN COSENO REALZADO)
@@ -289,13 +304,6 @@ out_Q_total = aplicar_skew_temporal(out_Q_th, fs, tau_Q)
 # plt.tight_layout()
 # plt.show()
 
-reconst = out_bb + (IF_I * np.cos(2 * np.pi * f_lo * t) + IF_Q * np.sin(2 * np.pi * f_lo * t))
-
-# graficar_diagrama_ojo(IF_I, sps, "Paso 2: Salida del Mixer (Rama I)")
-graficar_constelacion(np.real(reconst), sps, I_mixer_ideal, "Paso 2: Salida del Mixer (Plano I vs Q)")
-plt.show()
-
-
 # # -----------------------------------------------------------------------------
 # # PASO 3: BLOQUE TRACK & HOLD CON BANDWIDTH MISMATCH - d_I(t), d_Q(t)
 # # -----------------------------------------------------------------------------
@@ -319,12 +327,6 @@ plt.show()
 # plt.legend()
 # plt.tight_layout()
 # plt.show()
-
-reconst = out_bb + (I_solo_bw * np.cos(2 * np.pi * f_lo * t) + Q_solo_bw_mis * np.sin(2 * np.pi * f_lo * t))
-
-# graficar_diagrama_ojo(Q_solo_bw_mis, sps, f"Paso 3.A: Efecto Individual BW Mismatch (Rama Q, BW={BW_th_Q/1e9:.1f} GHz)")
-graficar_constelacion(np.real(reconst), sps, I_subbanda_ideal, "Paso 3.A: Solo BW Mismatch (Plano I vs Q)")
-plt.show()
 
 # # 3.B) Efecto Acumulado hasta el T&H (Comparado contra Sub-bandas I/Q Ideales)
 # plt.figure(figsize=(10, 5))
@@ -407,3 +409,14 @@ plt.show()
 # graficar_diagrama_ojo(out_Q_total, sps, "Paso 4.B: Señal Final a Ecualizar con TODOS los efectos (Rama Q)")
 # graficar_constelacion(out_I_total, sps, I_subbanda_ideal, "Paso 4.B: Cadena Completa con TODOS los efectos (Plano I vs Q)", senial_Q=out_Q_total, ref_Q=Q_subbanda_ideal)
 # plt.show()
+
+# Constelaciones
+# Post TIA (mas cercano al ideal)
+reconst = 2 * (I_subbanda_ideal * np.cos(2 * np.pi * f_lo * t) + Q_subbanda_ideal * np.sin(2 * np.pi * f_lo * t))
+graficar_constelacion(np.real(reconst), sps, senial_alineada, "Reconstruccion ideal")
+plt.show()
+# Final de la cadena (mas deformada)
+reconst = 2 * (out_I_total * np.cos(2 * np.pi * f_lo * t) + out_Q_total * np.sin(2 * np.pi * f_lo * t))
+graficar_constelacion(np.real(reconst), sps, senial_alineada, "Reconstruccion final")
+plt.show()
+
