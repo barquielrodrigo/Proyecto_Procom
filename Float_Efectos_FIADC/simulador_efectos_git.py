@@ -86,9 +86,69 @@ def graficar_diagrama_ojo(senial, sps, titulo, ref_ideal=None, lag_fijo=None, n_
     plt.ylabel("Amplitud")
     plt.grid(True)
 
+#con jitter
+# def graficar_constelacion(senial_I, sps, ref_I, titulo, senial_Q=None, ref_Q=None, lag_fijo=None, cmap='jet'):
+#     """
+#     Grafica la constelación de los símbolos recibidos coloreados por densidad de puntos (Heatmap).
+#     """
+#     muestras_I = obtener_muestras_simbolo(senial_I, sps, ref_I, lag_fijo=lag_fijo)
+    
+#     plt.figure(figsize=(6.5, 6))
+    
+#     if senial_Q is not None:
+#         if ref_Q is None:
+#             ref_Q = ref_I
+#         muestras_Q = obtener_muestras_simbolo(senial_Q, sps, ref_Q, lag_fijo=lag_fijo)
+#         n_min = min(len(muestras_I), len(muestras_Q))
+#         muestras_I, muestras_Q = muestras_I[:n_min], muestras_Q[:n_min]
+        
+#         # 1. Cálculo de Densidad 2D con Gaussian KDE
+#         xy = np.vstack([muestras_I, muestras_Q])
+#         z = gaussian_kde(xy)(xy)
+        
+#         # 2. Ordenar puntos para que los más densos (rojos) se dibujen al frente
+#         idx = z.argsort()
+#         x, y, z = muestras_I[idx], muestras_Q[idx], z[idx]
+        
+#         # 3. Scatter plot coloreado por densidad
+#         sc = plt.scatter(x, y, c=z, cmap=cmap, s=8, edgecolors='none')
+#         cbar = plt.colorbar(sc)
+#         cbar.set_label('Densidad de símbolos')
+        
+#         plt.xlabel("In phase")
+#         plt.ylabel("Quadrature")
+        
+#     else:
+#         # Caso 1D (PAM-4): Agregamos jitter aleatorio en Y para formar nubes 2D de densidad
+#         y_jitter = np.random.normal(0, 0.08, size=len(muestras_I))
+        
+#         xy = np.vstack([muestras_I, y_jitter])
+#         z = gaussian_kde(xy)(xy)
+        
+#         idx = z.argsort()
+#         x, y, z = muestras_I[idx], y_jitter[idx], z[idx]
+        
+#         sc = plt.scatter(x, y, c=z, cmap=cmap, s=12, edgecolors='none')
+#         cbar = plt.colorbar(sc)
+#         cbar.set_label('Densidad de símbolos')
+        
+#         for nivel in [-3, -1, 1, 3]:
+#             plt.axvline(nivel, color='black', linestyle='--', alpha=0.5)
+            
+#         plt.xlabel("In phase")
+#         plt.ylabel("Quadrature")
+#         plt.ylim(-1, 1)
+
+#     plt.title(f"Constelación Recibida - {titulo}")
+#     plt.axhline(0, color='gray', linewidth=0.5)
+#     plt.axvline(0, color='gray', linewidth=0.5)
+#     plt.grid(True, linestyle=':', alpha=0.7)
+#     plt.tight_layout()
+
+#Sin jitter
 def graficar_constelacion(senial_I, sps, ref_I, titulo, senial_Q=None, ref_Q=None, lag_fijo=None, cmap='jet'):
     """
-    Grafica la constelación de los símbolos recibidos coloreados por densidad de puntos (Heatmap).
+    Grafica la constelación de los símbolos recibidos.
     """
     muestras_I = obtener_muestras_simbolo(senial_I, sps, ref_I, lag_fijo=lag_fijo)
     
@@ -101,15 +161,13 @@ def graficar_constelacion(senial_I, sps, ref_I, titulo, senial_Q=None, ref_Q=Non
         n_min = min(len(muestras_I), len(muestras_Q))
         muestras_I, muestras_Q = muestras_I[:n_min], muestras_Q[:n_min]
         
-        # 1. Cálculo de Densidad 2D con Gaussian KDE
+        # Cálculo de Densidad 2D con Gaussian KDE
         xy = np.vstack([muestras_I, muestras_Q])
         z = gaussian_kde(xy)(xy)
         
-        # 2. Ordenar puntos para que los más densos (rojos) se dibujen al frente
         idx = z.argsort()
         x, y, z = muestras_I[idx], muestras_Q[idx], z[idx]
         
-        # 3. Scatter plot coloreado por densidad
         sc = plt.scatter(x, y, c=z, cmap=cmap, s=8, edgecolors='none')
         cbar = plt.colorbar(sc)
         cbar.set_label('Densidad de símbolos')
@@ -118,18 +176,9 @@ def graficar_constelacion(senial_I, sps, ref_I, titulo, senial_Q=None, ref_Q=Non
         plt.ylabel("Quadrature")
         
     else:
-        # Caso 1D (PAM-4): Agregamos jitter aleatorio en Y para formar nubes 2D de densidad
-        y_jitter = np.random.normal(0, 0.08, size=len(muestras_I))
-        
-        xy = np.vstack([muestras_I, y_jitter])
-        z = gaussian_kde(xy)(xy)
-        
-        idx = z.argsort()
-        x, y, z = muestras_I[idx], y_jitter[idx], z[idx]
-        
-        sc = plt.scatter(x, y, c=z, cmap=cmap, s=12, edgecolors='none')
-        cbar = plt.colorbar(sc)
-        cbar.set_label('Densidad de símbolos')
+        # Caso 1D (PAM-4): Sin jitter, color uniforme sobre Q = 0 y sin barra de color
+        y = np.zeros_like(muestras_I)
+        plt.scatter(muestras_I, y, color='blue', s=20, alpha=0.6)
         
         for nivel in [-3, -1, 1, 3]:
             plt.axvline(nivel, color='black', linestyle='--', alpha=0.5)
