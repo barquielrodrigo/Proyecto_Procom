@@ -24,6 +24,27 @@ def aplicar_lpf_butterworth(senial, fs, fc, orden, causal=False):
         
     return senial_filtrada, sos
 
+def aplicar_hpf_butterworth(senial, fs, fc, orden, causal=False):
+    """
+    Modelo del filtro c(t) previo al mixer (HPF a 48 GHz).
+    
+    Parametros:
+    - senial: Entrada.
+    - fs: Frecuencia de muestreo.
+    - fc: Frecuencia de corte.
+    - orden: Orden Butterworth (4 recomendado).
+    - causal: Si True, usa 'sosfilt' (comportamiento físico real con retardo).
+              Si False, usa 'sosfiltfilt' (sin retardo de grupo).
+    """
+    sos = signal.butter(N=orden, Wn=fc, btype='highpass', analog=False, fs=fs, output='sos')
+    
+    if causal:
+        senial_filtrada = signal.sosfilt(sos, senial)
+    else:
+        senial_filtrada = signal.sosfiltfilt(sos, senial)
+        
+    return senial_filtrada, sos
+
 def graficar_diagrama_ojo(senial, sps, n_simbolos_pantalla=3, n_trazas=500):
     muestras_por_traza = sps * n_simbolos_pantalla
     n_trazas_posibles = len(senial) // muestras_por_traza
@@ -129,7 +150,7 @@ plt.xlabel('Frecuencia [GHz]')
 plt.ylabel('Amplitud')
 plt.xlim(-110,110)
 plt.title('Espectro de la señal a transmitir (dos sub-bandas de PAM-4)')
-plt.show()
+# plt.show()
 
 # Primer bloque: TIA
 BW_tia = 100e9
@@ -143,17 +164,35 @@ RF_IF = 10**(-35/20) # fuga en veces
 epsilon = 0.01 # error de ganancia
 phi_rad = np.deg2rad(9) # error de fase [rad]
 f_lo = 48e9 #depende del centro de las subbandas
-# LO = np.tanh((1 + epsilon/2) * np.cos(2 * np.pi * f_lo * t + phi_rad)) # senal cuadrada real
-LO = (1 + epsilon/2) * np.sign(np.cos(2 * np.pi * f_lo * t + phi_rad/2)) # senal cuadrada perfecta
+# LO = np.tanh((2 + epsilon/2) * np.cos(2 * np.pi * f_lo * t + phi_rad)) # senal cuadrada real
+LO = (2 + epsilon/2) * np.cos(2 * np.pi * f_lo * t + phi_rad/2) # senal cuadrada perfecta
 
 # #visualizo el LO
 # plt.figure(figsize=(8,6))
 # plt.plot(t,LO)
 # plt.title('Señal cuadrada del oscilador local')
 
-# Modelo de mixer del paper
-RF , sos_RF = aplicar_lpf_butterworth(senial_tia,fs,100e9,1) #filtro de entrada
+# Antes del mixer debo aplicar el filtrado para evitar solapamiento o crosstalk (Sistema real)
+# senial_tia_hf, sos_hpf = aplicar_hpf_butterworth(senial_tia,fs,fc=48e9,orden=4)
+# Directamente utilizo la sub-banda superior y le aplico el TIA                 (Sistema ideal)
+senial_tia_hf, _ = aplicar_lpf_butterworth(s2_ssb,fs,BW_tia,3)
 
+# Grafico espectral de la subbanda superior llevada a banda base
+N = len(senial_tia_hf)
+freqs = np.fft.fftshift(np.fft.fftfreq(N, d=1/fs)) / 1e9  # Eje en GHz
+espectro_fft = np.fft.fftshift(np.fft.fft(senial_tia_hf))
+magnitud_db = 20 * np.log10(np.abs(espectro_fft) / np.max(np.abs(espectro_fft)))
+plt.figure(figsize=(8,6))
+plt.plot(freqs,magnitud_db)
+plt.xlabel('Frecuencia [GHz]')
+plt.ylabel('Amplitud')
+plt.xlim(-110,110)
+plt.title('Espectro de la señal de subbanda superior luego de TIA y HPF')
+plt.show()
+
+# Modelo de mixer del paper
+RF , sos_RF = aplicar_lpf_butterworth(senial_tia_hf,fs,100e9,1) #filtro de entrada
+# RF = s2_ssb # para comprobar que la SSB tiene la señal PAM4
 post_mix = (RF + LO_Port * LO) * LO #agrego la fuga y paso por el mixer
 post_mix = post_mix + RF_IF * RF + LO_Port * LO #agrego las otras fugas
 
@@ -184,7 +223,7 @@ plt.xlabel('Muestras')
 plt.ylabel('Amplitud')
 plt.title('Señal PAM-4 transmitida (Banda superior)')
 plt.tight_layout()
-plt.show()
+# plt.show()
 
 #Visualizo el resultado del TIA (solo retardo, no filtra nada de las señales utiles)
 plt.figure(figsize=(10, 4))
@@ -195,18 +234,18 @@ plt.ylabel('Amplitud')
 plt.title('Efecto del TIA sobre la señal transmitida')
 plt.grid(True)
 plt.legend()
-plt.show()
+# plt.show()
 
 # Visualizo el resultado del mixer (deberia incrementar la frecuencia)
 plt.figure(figsize=(10, 4))
-plt.plot(senial_tia[:2000], label="Entrada al Mixer", alpha=0.6)
+plt.plot(senial_tia_hf[:2000], label="Entrada al Mixer", alpha=0.6)
 plt.plot(IF_hf[:2000], label="Salida Mixer", linewidth=2)
 plt.xlabel('Muestras')
 plt.ylabel('Amplitud')
 plt.title('Efecto del mixer sobre la señal transmitida')
 plt.grid(True)
 plt.legend()
-plt.show()
+# plt.show()
 
 # Visualizo el resultado del T&H
 plt.figure(figsize=(10, 4))
@@ -225,7 +264,7 @@ plt.xlabel('Muestras')
 plt.ylabel('Amplitud')
 plt.grid(True)
 plt.legend()
-plt.show()
+# plt.show()
 
 # Visualizo el resultado de toda la cadena
 plt.figure(figsize=(10, 4))
@@ -245,7 +284,7 @@ plt.ylabel('Amplitud')
 plt.title('Efecto de la cadena de procesamiento sobre la señal transmitida')
 plt.grid(True)
 plt.legend()
-plt.show()
+# plt.show()
 
 # Diagramas de ojo en cada etapa
 
@@ -297,9 +336,9 @@ plt.tight_layout()
 plt.figure(figsize=(8, 4))
 
 # Puntos recibidos (usamos alpha para visualizar la densidad de puntos con ruido/ISI)
-plt.scatter(np.real(senial_alineada_hf[::sps]), np.imag(senial_alineada_hf[::sps]), alpha=0.3, color='blue', marker='x', edgecolors='none', label='Símbolos transmitidos')
+plt.scatter(np.real(senial_alineada_hf[::sps]), np.imag(senial_alineada_hf[::sps]), alpha=0.3, color='blue', marker='x', label='Símbolos transmitidos')
 
-plt.scatter(np.real(out_hf[delay::sps]), np.imag(out_hf[delay::sps]), alpha=0.3, color='m', edgecolors='none', label='Símbolos recibidos')
+plt.scatter(np.real(out_hf[delay::sps]), np.imag(out_hf[delay::sps]), alpha=0.3, color='m', label='Símbolos recibidos')
 
 plt.axhline(0, color='gray', linestyle='--', alpha=0.5)
 plt.title('Diagrama de Constelación PAM-4 (HB)')
