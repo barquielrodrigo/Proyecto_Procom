@@ -116,7 +116,7 @@ fs = Rs * sps
 fc = 48e9
 t = np.arange(len(senial)) / fs
 s2_hilbert = hilbert(senial_hf)
-s2_ssb = np.real(s2_hilbert * np.exp(1j * 2 * np.pi * fc * t))
+s2_ssb = np.real(s2_hilbert * np.exp(1j * 2 * np.pi * fc * t)) #banda superior
 
 s_total_FI = senial + s2_ssb
 
@@ -134,12 +134,21 @@ f_lo = 48e9
 
 # Osciladores Locales
 LO_ideal = 2 * np.cos(2 * np.pi * f_lo * t)
-LO_estatico = (2 + epsilon/2) * np.cos(2 * np.pi * f_lo * t + phi_rad/2)
+LO_estatico = (2 + epsilon/2) * np.sign(np.cos(2 * np.pi * f_lo * t + phi_rad/2))
+
+# Comportamiento ideal
+# Sin señal vecina (HPF perfecto)
+s2_ideal = s2_ssb*LO_ideal
+s2_ideal_filt , _ = aplicar_lpf_butterworth(s2_ideal,fs,fc=48e9,orden=3)
+# Con señal vecina 
+s2_filt , _ = aplicar_hpf_butterworth(s_total_FI,fs,fc=48e9,orden=3)
+s2_ideal_FI = s2_filt*LO_ideal
+s2_ideal_filt_FI , _ = aplicar_lpf_butterworth(s2_ideal_FI,fs,fc=48e9,orden=3)
 
 sigma_rw = 2 * np.pi * 8e-4
 ruido_fase_lo = np.cumsum(np.random.normal(0, sigma_rw, size=len(t)))
 LO_solo_jitter = 2 * np.cos(2 * np.pi * f_lo * t + ruido_fase_lo)
-LO_completo = (2 + epsilon/2) * np.cos(2 * np.pi * f_lo * t + phi_rad/2 + ruido_fase_lo)
+LO_completo = (2 + epsilon/2) * np.sign(np.cos(2 * np.pi * f_lo * t + phi_rad/2 + ruido_fase_lo))
 
 # Jitter de Apertura (Vector de tiempo para el ADC)
 sigma_t_adc = 300e-15
@@ -205,6 +214,7 @@ rc.plot(time_domain=True, freq_domain=True)
 
 # Espectros Tx (Banda Inferior y Superior en Subplots)
 plt.figure(figsize=(10, 7))
+plt.subplot(2, 2, 1)
 espectro_fft = np.fft.fftshift(np.fft.fft(senial))
 magnitud_db = 20 * np.log10(np.abs(espectro_fft) / np.max(np.abs(espectro_fft)))
 freqs = np.fft.fftshift(np.fft.fftfreq(len(senial), d=1/fs)) / 1e9
@@ -212,7 +222,7 @@ plt.plot(freqs, magnitud_db)
 plt.xlabel('Frecuencia [GHz]')
 plt.ylabel('Magnitud Normalizada [dB]')
 plt.xlim(-110, 110)
-plt.title('Espectro Tx: Sub-banda Inferior en Banda Base (0 a 48 GHz)')
+plt.title('Sub-banda en Banda Base (0 a 48 GHz)')
 plt.grid(True)
 
 
@@ -221,46 +231,95 @@ N = len(s2_ssb)
 freqs = np.fft.fftshift(np.fft.fftfreq(N, d=1/fs)) / 1e9
 espectro_fft = np.fft.fftshift(np.fft.fft(s2_ssb))
 magnitud_db = 20 * np.log10(np.abs(espectro_fft) / np.max(np.abs(espectro_fft)))
-plt.figure(figsize=(10, 7))
-plt.plot(freqs, magnitud_db, color='g')
+plt.subplot(2, 2, 2)
+plt.plot(freqs, magnitud_db, color='r')
 plt.xlabel('Frecuencia [GHz]')
 plt.ylabel('Magnitud Normalizada [dB]')
 plt.xlim(-110, 110)
-plt.title('Espectro Tx: Sub-banda Superior Modulada en SSB-SC (48 a 96 GHz)')
+plt.title('Sub-banda Superior Modulada en SSB (48 a 96 GHz)')
 plt.grid(True)
 plt.tight_layout()
 
 # Espectro Compuesto FI y Separación HPF
-plt.figure(figsize=(10, 7))
+plt.subplot(2, 2, (3, 4))
 N = len(s_total_FI)
 freqs = np.fft.fftshift(np.fft.fftfreq(N, d=1/fs)) / 1e9
 espectro_fft = np.fft.fftshift(np.fft.fft(s_total_FI))
 magnitud_db = 20 * np.log10(np.abs(espectro_fft) / np.max(np.abs(espectro_fft)))
-plt.plot(freqs, magnitud_db)
+plt.plot(freqs, magnitud_db, color='m')
 plt.xlabel('Frecuencia [GHz]')
 plt.ylabel('Magnitud Normalizada [dB]')
 plt.xlim(-110, 110)
-plt.title('Espectro en Canal FI: Señal Compuesta s_total_FI (0 a 96 GHz)')
+plt.title('Señal Compuesta FI (0 a 96 GHz)')
 plt.grid(True)
+plt.tight_layout()
+plt.show()
 
 plt.figure(figsize=(10, 7))
 N = len(senial_tia_hf_aislada)
 freqs = np.fft.fftshift(np.fft.fftfreq(N, d=1/fs)) / 1e9
 esp_orig = 20 * np.log10(np.abs(np.fft.fftshift(np.fft.fft(senial_tia_hf_aislada))) / np.max(np.abs(np.fft.fft(senial_tia_hf_aislada))))
 esp_solap = 20 * np.log10(np.abs(np.fft.fftshift(np.fft.fft(senial_hpf_con_solap))) / np.max(np.abs(np.fft.fft(senial_hpf_con_solap))))
-plt.plot(freqs, esp_solap, color='r', alpha=0.8, label='Con Solapamiento (HPF 4º Orden sobre s_total_FI)')
-plt.plot(freqs, esp_orig, color='b', linestyle='--', alpha=0.7, label='Sin Solapamiento (s2_ssb aislada)')
+plt.plot(freqs, esp_solap, color='r', alpha=0.8, label='Con Solapamiento (HPF 4º Orden)')
+plt.plot(freqs, esp_orig, color='b', linestyle='--', alpha=0.7, label='Sin Solapamiento (filtrado ideal)')
 plt.axvline(48, color='k', linestyle=':', label='Frecuencia de cruce (48 GHz)')
+plt.axvline(-48, color='k', linestyle=':')
 plt.xlabel('Frecuencia [GHz]')
 plt.ylabel('Magnitud Normalizada [dB]')
 plt.xlim(-110, 110)
 plt.ylim(-100, 5)
-plt.title('Espectro en Puerto RF del Mixer: Efecto de Solapamiento de Banda Inferior')
+plt.title('Espectro de entrada al Mixer: Efecto de Solapamiento de Banda Inferior')
 plt.legend()
 plt.grid(True)
 plt.tight_layout()
 plt.show()
 
+# Resultados ideales
+senial_filt , _ = aplicar_lpf_butterworth(s_total_FI,fs,48e9,4)
+plt.figure(figsize=(8,6))
+plt.plot(senial, label = 'Señal BB transmitida')
+plt.plot(senial_filt, label = 'Señal BB filtrada LPF orden 3')
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.title('Respuesta temporal de la señal PAM-4 transmitida en BB')
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+
+plt.figure(figsize=(8,6))
+plt.subplot(2,1,1)
+plt.plot(senial_hf, label = 'Señal HB transmitida')
+# plt.plot(s2_ideal_FI, label = 'Señal HB sin filtrado LPF (con HPF orden 3)')
+plt.plot(s2_ideal_filt_FI, label = 'Señal HB filtrada LPF orden 3 (con HPF orden 3)')
+plt.title('Respuesta temporal de la señal PAM-4 transmitida en HB')
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.subplot(2,1,2)
+plt.plot(senial_hf, label = 'Señal HB transmitida')
+# plt.plot(s2_ideal, label = 'Señal HB sin filtrado LPF (con HPF perfecto)')
+plt.plot(s2_ideal_filt, label = 'Señal HB filtrada LPF orden 3 (con HPF perfecto)')
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+
+graficar_par_ojos(senial,senial_filt,sps,'Señal original BB','Señal recuperada BB (LPF orden 3)')
+# HPF perfecto
+# graficar_par_ojos(senial_hf,s2_ideal,sps,'Señal original HB','Señal recuperada HB (Sin filtrado LPF) (con HPF perfecto)')
+graficar_par_ojos(senial_hf,s2_ideal_filt,sps,'Señal original HB','Señal recuperada HB (LPF orden 3) (con HPF perfecto)')
+# HPF orden 3
+# graficar_par_ojos(senial_hf,s2_ideal_FI,sps,'Señal original HB','Señal recuperada HB (Sin filtrado LPF) (con HPF orden 3)')
+graficar_par_ojos(senial_hf,s2_ideal_filt_FI,sps,'Señal original HB','Señal recuperada HB (LPF orden 3) (con HPF orden 3)')
+
+# HPF perfecto
+# graficar_par_constelaciones(senial_alineada,senial_filt,senial_alineada_hf,s2_ideal,'Señal BB','Señal HB (Sin filtrado LPF) (con HPF perfecto)')
+graficar_par_constelaciones(senial_alineada,senial_filt,senial_alineada_hf,s2_ideal_filt,'Señal BB','Señal HB (LPF orden 3) (con HPF perfecto)')
+# HPF orden 3
+# graficar_par_constelaciones(senial_alineada,senial_filt,senial_alineada_hf,s2_ideal_FI,'Señal BB','Señal HB (Sin filtrado LPF) (con HPF orden 3)')
+graficar_par_constelaciones(senial_alineada,senial_filt,senial_alineada_hf,s2_ideal_filt_FI,'Señal BB','Señal HB (LPF orden 3) (con HPF orden 3)')
+
+plt.show()
 
 # ==============================================================================
 # 4. GRÁFICOS TEMPORALES EN SUBPLOTS (BANDA INFERIOR Y SUPERIOR)
@@ -392,19 +451,19 @@ plt.show()
 plt.figure(figsize=(10, 7))
 plt.subplot(2, 1, 1)
 plt.plot(senial[:2000], color='r', alpha=0.5, label="Señal Tx Original (Banda Inferior)")
-plt.plot(out_bb_total[:2000], color='b', linewidth=1.5, label="Señal Rx con Todos los Efectos (T&H + Solapamiento + Jitter)")
+plt.plot(out_bb_total[:2000], color='b', linewidth=1.5, label="Señal Rx a ecualizar (Banda Inferior)")
 plt.xlabel('Muestras')
 plt.ylabel('Amplitud')
-plt.title('Señal PAM-4 Final con Todos los Efectos Sumados: Banda Inferior')
+plt.title('Señal PAM-4 en el ecualizador considerando todos los efectos: Banda Inferior')
 plt.grid(True)
 plt.legend()
 
 plt.subplot(2, 1, 2)
 plt.plot(senial_hf[:2000], color='g', alpha=0.5, label="Señal Tx Original (Banda Superior)")
-plt.plot(out_hf_total[:2000], color='m', linewidth=1.5, label="Señal Rx con Todos los Efectos (T&H + Mixer + Solapamiento + Jitter)")
+plt.plot(out_hf_total[:2000], color='m', linewidth=1.5, label="Señal Rx a ecualizar (Banda Superior)")
 plt.xlabel('Muestras')
 plt.ylabel('Amplitud')
-plt.title('Señal PAM-4 Final con Todos los Efectos Sumados: Banda Superior')
+plt.title('Señal PAM-4 en el ecualizador considerando todos los efectos: Banda Superior')
 plt.grid(True)
 plt.legend()
 plt.tight_layout()
@@ -415,12 +474,36 @@ plt.show()
 # 5. DIAGRAMAS DE OJO EN SUBPLOTS (BANDA INFERIOR Y SUPERIOR)
 # ==============================================================================
 
+plt.figure(figsize=(10,8))
+plt.subplot(2,2,1)
+graficar_diagrama_ojo(senial_alineada, sps=sps, nueva_figura=False)
+plt.title("Señal Tx Ideal (Banda Inferior)")
+plt.xlabel("Tiempo [Símbolos $T_s$]")
+plt.ylabel("Amplitud")
+plt.subplot(2,2,2)
+graficar_diagrama_ojo(senial_alineada_hf, sps=sps, nueva_figura=False)
+plt.title("Señal Tx Ideal (Banda Superior)")
+plt.xlabel("Tiempo [Símbolos $T_s$]")
+plt.ylabel("Amplitud")
+plt.subplot(2,2,3)
+graficar_diagrama_ojo(out_bb_total, sps=sps, nueva_figura=False)
+plt.title("Todos los Efectos (Banda Inferior)")
+plt.xlabel("Tiempo [Símbolos $T_s$]")
+plt.ylabel("Amplitud")
+plt.subplot(2,2,4)
+graficar_diagrama_ojo(out_hf_total, sps=sps, nueva_figura=False)
+plt.title("Todos los Efectos (Banda Superior)")
+plt.xlabel("Tiempo [Símbolos $T_s$]")
+plt.ylabel("Amplitud")
+plt.grid(True)
+plt.tight_layout()
+
 # 1. Ideales Tx
-graficar_par_ojos(
-    senial_alineada, senial_alineada_hf, sps=sps,
-    titulo_bb="Diagrama de Ojo: Señal Tx Ideal (Banda Inferior)",
-    titulo_hb="Diagrama de Ojo: Señal Tx Ideal (Banda Superior)"
-)
+# graficar_par_ojos(
+#     senial_alineada, senial_alineada_hf, sps=sps,
+#     titulo_bb="Diagrama de Ojo: Señal Tx Ideal (Banda Inferior)",
+#     titulo_hb="Diagrama de Ojo: Señal Tx Ideal (Banda Superior)"
+# )
 
 # 2. Efecto Aislado: Solo T&H
 graficar_par_ojos(
@@ -452,11 +535,11 @@ graficar_par_ojos(
 )
 
 # 6. Suma Total de Efectos
-graficar_par_ojos(
-    out_bb_total, out_hf_total, sps=sps,
-    titulo_bb="Diagrama de Ojo Final: Todos los Efectos Sumados (Banda Inferior)",
-    titulo_hb="Diagrama de Ojo Final: Todos los Efectos Sumados (Banda Superior)"
-)
+# graficar_par_ojos(
+#     out_bb_total, out_hf_total, sps=sps,
+#     titulo_bb="Diagrama de Ojo Final: Todos los Efectos Sumados (Banda Inferior)",
+#     titulo_hb="Diagrama de Ojo Final: Todos los Efectos Sumados (Banda Superior)"
+# )
 plt.show()
 
 
@@ -512,9 +595,9 @@ plt.subplot(2, 1, 1)
 niveles_bb = [0.15, 0.05, -0.05, -0.15]
 etiquetas_bb = [
     '1. Solo T&H',
-    '2. Solo Solapamiento (Fuga HB)',
+    '2. Solo Solapamiento',
     '3. Solo Jitter (ADC)',
-    '4. TODOS LOS EFECTOS SUMADOS'
+    '4. TODOS LOS EFECTOS'
 ]
 seniales_bb = [out_bb_solo_th, out_bb_solo_solap, out_bb_solo_jitter, out_bb_total]
 colores_bb = ['blue', 'green', 'orange', 'red']
@@ -524,20 +607,21 @@ for y_val, sig, col, lab in zip(niveles_bb, seniales_bb, colores_bb, etiquetas_b
     plt.scatter(muestras, np.zeros_like(muestras) + y_val, alpha=0.3, color=col, label=lab)
 
 plt.yticks(niveles_bb, etiquetas_bb)
-plt.title('Resumen de Constelaciones PAM-4: Efectos Aislados vs Suma Total (Banda Inferior)')
+plt.title('Constelaciones PAM-4 para distintos efectos (Banda Inferior)')
 plt.xlabel('Amplitud en Fase (I)')
+plt.xlim(-4.5, 4.5)
 plt.ylim(-0.25, 0.25)
 plt.grid(True, linestyle=':', alpha=0.6)
-plt.legend(loc='upper right')
+# plt.legend(loc='upper right')
 
 plt.subplot(2, 1, 2)
 niveles_hb = [0.2, 0.1, 0.0, -0.1, -0.2]
 etiquetas_hb = [
     '1. Solo T&H',
-    '2. Solo Mixer (Fugas + Error LO)',
-    '3. Solo Solapamiento (Fuga BB)',
-    '4. Solo Jitter (LO + ADC)',
-    '5. TODOS LOS EFECTOS SUMADOS'
+    '2. Solo Mixer',
+    '3. Solo Solapamiento',
+    '4. Solo Jitter',
+    '5. TODOS LOS EFECTOS'
 ]
 seniales_hb = [out_hf_solo_th, out_hf_solo_mixer, out_hf_solo_solap, out_hf_solo_jitter, out_hf_total]
 colores_hb = ['blue', 'purple', 'green', 'orange', 'red']
@@ -547,10 +631,11 @@ for y_val, sig, col, lab in zip(niveles_hb, seniales_hb, colores_hb, etiquetas_h
     plt.scatter(muestras, np.zeros_like(muestras) + y_val, alpha=0.3, color=col, label=lab)
 
 plt.yticks(niveles_hb, etiquetas_hb)
-plt.title('Resumen de Constelaciones PAM-4: Efectos Aislados vs Suma Total (Banda Superior)')
+plt.title('Constelaciones PAM-4 para distintos efectos (Banda Superior)')
 plt.xlabel('Amplitud en Fase (I)')
+plt.xlim(-4.5, 4.5)
 plt.ylim(-0.3, 0.3)
 plt.grid(True, linestyle=':', alpha=0.6)
-plt.legend(loc='upper right')
+# plt.legend(loc='upper right')
 plt.tight_layout()
 plt.show()
