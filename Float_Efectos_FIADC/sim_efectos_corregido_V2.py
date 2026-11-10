@@ -82,7 +82,9 @@ def graficar_par_constelaciones(tx_bb, rx_bb, tx_hb, rx_hb, titulo_bb, titulo_hb
 # 1. GENERACIÓN DE SEÑALES TRANSMITIDAS (Tx)
 # ==============================================================================
 M = 1000
+# np.random.seed(0)
 simb_pam = np.random.choice([-3, -1, 1, 3], size=M)
+# np.random.seed(100)
 simb_pam_hf = np.random.choice([-3, -1, 1, 3], size=M)
 
 print(f"Primeros símbolos BB: {simb_pam[0:10]}")
