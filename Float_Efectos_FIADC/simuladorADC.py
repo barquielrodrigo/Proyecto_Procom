@@ -21,11 +21,12 @@ def aplicar_hpf_butterworth(senial, fs, fc, orden, causal=False):
         senial_filtrada = signal.sosfiltfilt(sos, senial)
     return senial_filtrada, sos
 
-def simuladorADC(signal, rolloff, span, sps, fugaOL=0, fugaIO=0, epsilon=0, phi_deg=0, square_mixer=True, jitter_OL=0, jitter_adc=0):
+def simuladorADC(signal, fs, rolloff, span, sps, fugaOL=None, fugaIO=None, epsilon=0, phi_deg=0, square_mixer=False, jitter_OL=0, jitter_adc=0):
     """Simula distintos efectos de una cadena tipica de FI-ADC.
 
     Args:
-        signal (float array M x 1): senal PAM-4 transmitida
+        signal (float array M x 1): senal transmitida
+        fs: frecuencia de muestreo de la señal
         rolloff (float): factor de roll off del filtro Raised Cosine.
         span: cantidad de simbolos involucrados con el pulso Raised Cosine.
         sps: muestras por simbolo dentro del Raised Cosine.
@@ -33,54 +34,24 @@ def simuladorADC(signal, rolloff, span, sps, fugaOL=0, fugaIO=0, epsilon=0, phi_
         fugaIO: fuga (valor positivo) en el mixer de entrada hacia salida [dB].
         epsilon: error de ganancia en el mixer.
         phi_deg: error de fase del mixer [grados].
-        square_mixer: Bandera para determinar si el mixer es de senal cuadrada o sinusoidal. (Por defecto en True)
+        square_mixer: Bandera para determinar si el mixer es de senal cuadrada o sinusoidal. (Por defecto en False)
         jitter_OL: tiempo del jitter para el oscilador local [segundos].
         jitter_adc: tiempo del jitter para el muestreo del ADC [segundos].
 
-
-
-
     Returns:
-        float: El área total calculada (base por altura).
+        y_inf: subbanda inferior.
+        y_sup: subbanda superior.
     """
 
-    ## Transmisor ideal sin modelado en detalle
-
-    # Separación en símbolos pares (Banda Inferior) e impares (Banda Superior)
-    simb_pam = signal[0::2]
-    simb_pam_hf = signal[1::2]
-
-    # Sobremuestreo de cada sub-banda
-    simb_upsampled = np.zeros(len(simb_pam) * sps)
-    simb_upsampled[::sps] = simb_pam  
-    simb_upsampled_hf = np.zeros(len(simb_pam_hf) * sps)
-    simb_upsampled_hf[::sps] = simb_pam_hf  
-
-    # Filtro conformador de cada sub-banda
-    rc = RaisedCosineFilter(alpha=rolloff, span=span, sps=sps, rrc=False)
-    rc_filter = rc.get_coefficients()
-    senial = np.convolve(simb_upsampled, rc_filter, mode='full')       # Banda base
-    senial_hf = np.convolve(simb_upsampled_hf, rc_filter, mode='full') # Sub-banda superior
-
-    BW_deseado = 48e9
-    Rs = (2 * BW_deseado) / (1 + rolloff)
-    fs = Rs * sps
-
-    fc = 48e9
-    t = np.arange(len(senial)) / fs
-    s2_hilbert = hilbert(senial_hf)
-    s2_ssb = np.real(s2_hilbert * np.exp(1j * 2 * np.pi * fc * t)) # Banda superior modulada en SSB
-
-    s_total_FI = senial + s2_ssb
-
-    ## Fin del transmisor
+    s_total_FI = signal
+    t = np.arange(len(s_total_FI)) / fs
 
     BW_tia = 100e9
     B_d = 48e9      # Dejo los valores fijos para que la transmision siempre sea 0-48GHz y 48-96GHz
     f_lo = 48e9
 
-    LO_Port = 10**(-fugaOL/20)
-    RF_IF = 10**(-fugaIO/20)   # Fugas del mixer
+    LO_Port = 0 if fugaOL is None else 10**(-fugaOL/20)
+    RF_IF   = 0 if fugaIO is None else 10**(-fugaIO/20)   # Fugas del mixer
     
     phi_rad = np.deg2rad(phi_deg)# Error de fase
 
@@ -113,3 +84,8 @@ def simuladorADC(signal, rolloff, span, sps, fugaOL=0, fugaIO=0, epsilon=0, phi_
     out_bb_total = np.interp(t_jitter_adc, t_ideal, out_bb_solo_solap)
     out_hf_pre_total, _ = aplicar_lpf_butterworth(IF_hf_total, fs, B_d, 4)
     out_hf_total = np.interp(t_jitter_adc, t_ideal, out_hf_pre_total)
+
+    out_bb_total = out_bb_total[::4]
+    out_hf_total = out_hf_total[::4] # submuestreo las subbandas 
+
+    return out_bb_total, out_hf_total
